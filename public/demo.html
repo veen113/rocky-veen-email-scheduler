@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instagram Business Account Finder - Demo</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fab fa-instagram"></i> Instagram Business Account Finder</h1>
+            <p>Discover newly created Instagram business accounts for collaboration opportunities</p>
+            <div style="background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px; margin-top: 10px;">
+                <strong>🎯 DEMO MODE</strong> - Using sample data to show interface functionality
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- Search Form -->
+            <section class="search-section">
+                <div class="search-form">
+                    <h2><i class="fas fa-search"></i> Search Instagram Business Accounts</h2>
+                    
+                    <form id="searchForm">
+                        <div class="form-group">
+                            <label for="niche">Business Niche *</label>
+                            <input type="text" id="niche" name="niche" placeholder="e.g., fitness, beauty, food, tech" required>
+                            <small>Try: fitness, beauty, tech, fashion, or food</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="location">Location (Optional)</label>
+                            <input type="text" id="location" name="location" placeholder="e.g., NYC, Miami, LA, SF">
+                            <small>Try: NYC, Miami, LA, or SF</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="limit">Number of Results</label>
+                            <select id="limit" name="limit">
+                                <option value="5">5 accounts</option>
+                                <option value="10" selected>10 accounts</option>
+                                <option value="20">20 accounts</option>
+                            </select>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-search"></i> Search Accounts (Demo)
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Loading Indicator -->
+            <div id="loadingIndicator" class="loading-indicator" style="display: none;">
+                <div class="spinner"></div>
+                <p>Searching for Instagram business accounts...</p>
+            </div>
+
+            <!-- Results Section -->
+            <section id="resultsSection" class="results-section" style="display: none;">
+                <div class="results-header">
+                    <h2><i class="fas fa-list"></i> Found Accounts</h2>
+                    <div class="results-actions">
+                        <button id="exportResults" class="btn btn-outline">
+                            <i class="fas fa-download"></i> Export CSV
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="accountsList" class="accounts-list">
+                    <!-- Results will be populated here -->
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2024 Instagram Business Account Finder. Built for collaboration outreach.</p>
+            <p><small>Demo mode - <a href="/" style="color: white;">Switch to live mode</a></small></p>
+        </footer>
+    </div>
+
+    <!-- Modal for Account Details -->
+    <div id="accountModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div id="modalBody">
+                <!-- Account details will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Demo version of the script that uses mock endpoints
+        let currentAccounts = [];
+
+        // DOM elements
+        const searchForm = document.getElementById('searchForm');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const resultsSection = document.getElementById('resultsSection');
+        const accountsList = document.getElementById('accountsList');
+        const exportResultsBtn = document.getElementById('exportResults');
+        const accountModal = document.getElementById('accountModal');
+
+        // Event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            searchForm.addEventListener('submit', handleSearch);
+            exportResultsBtn.addEventListener('click', handleExportResults);
+            
+            // Modal close functionality
+            const closeModal = document.querySelector('.close');
+            closeModal.addEventListener('click', () => {
+                accountModal.style.display = 'none';
+            });
+            
+            window.addEventListener('click', (e) => {
+                if (e.target === accountModal) {
+                    accountModal.style.display = 'none';
+                }
+            });
+        });
+
+        // Handle search form submission (using mock endpoint)
+        async function handleSearch(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(searchForm);
+            const searchParams = {
+                niche: formData.get('niche'),
+                location: formData.get('location'),
+                limit: parseInt(formData.get('limit'))
+            };
+            
+            if (!searchParams.niche.trim()) {
+                alert('Please enter a business niche');
+                return;
+            }
+            
+            showLoading(true);
+            hideResults();
+            
+            try {
+                const response = await fetch('/api/instagram/search-mock', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(searchParams)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentAccounts = result.data;
+                    displayAccounts(currentAccounts);
+                    showResults();
+                } else {
+                    throw new Error(result.error || 'Search failed');
+                }
+                
+            } catch (error) {
+                console.error('Search error:', error);
+                alert(`Search failed: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Display accounts in the UI
+        function displayAccounts(accounts) {
+            accountsList.innerHTML = '';
+            
+            if (accounts.length === 0) {
+                accountsList.innerHTML = `
+                    <div class="text-center">
+                        <p>No business accounts found for this search. Try different keywords or location.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            accounts.forEach((account, index) => {
+                const accountCard = createAccountCard(account, index);
+                accountsList.appendChild(accountCard);
+            });
+        }
+
+        // Create account card element
+        function createAccountCard(account, index) {
+            const card = document.createElement('div');
+            card.className = 'account-card fade-in';
+            
+            const initials = account.username ? account.username.substring(0, 2).toUpperCase() : 'IG';
+            const companyName = account.companyName || 'Unknown Company';
+            
+            card.innerHTML = `
+                <div class="account-header">
+                    <div class="account-avatar">${initials}</div>
+                    <div class="account-info">
+                        <h3>@${account.username || 'unknown'}</h3>
+                        <p>${companyName}</p>
+                    </div>
+                </div>
+                
+                <div class="account-details">
+                    <p><strong>Description:</strong> ${account.description || 'No description available'}</p>
+                    <p><strong>Discovered:</strong> ${formatDate(account.discoveredAt)}</p>
+                    ${account.businessCategory ? `<p><strong>Category:</strong> ${account.businessCategory}</p>` : ''}
+                </div>
+                
+                <div class="account-actions">
+                    <button class="btn btn-primary btn-small" onclick="viewAccountDetails('${account.username}')">
+                        <i class="fas fa-eye"></i> View Details
+                    </button>
+                    <a href="https://instagram.com/${account.username}" target="_blank" class="btn btn-outline btn-small">
+                        <i class="fab fa-instagram"></i> Visit Profile
+                    </a>
+                </div>
+            `;
+            
+            return card;
+        }
+
+        // View account details in modal (using mock endpoint)
+        async function viewAccountDetails(username) {
+            const modalBody = document.getElementById('modalBody');
+            modalBody.innerHTML = '<div class="text-center"><div class="spinner"></div><p>Loading account details...</p></div>';
+            accountModal.style.display = 'flex';
+            
+            try {
+                const response = await fetch(`/api/instagram/account-mock/${username}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayAccountDetailsModal(result.data, username);
+                } else {
+                    throw new Error(result.error || 'Failed to load account details');
+                }
+            } catch (error) {
+                modalBody.innerHTML = `<div class="text-center"><p>Error loading account details: ${error.message}</p></div>`;
+            }
+        }
+
+        // Display account details in modal
+        function displayAccountDetailsModal(details, username) {
+            const modalBody = document.getElementById('modalBody');
+            
+            modalBody.innerHTML = `
+                <h2><i class="fab fa-instagram"></i> @${username}</h2>
+                
+                <div class="account-details">
+                    <p><strong>Bio:</strong> ${details.bio || 'No bio available'}</p>
+                    <p><strong>Followers:</strong> ${details.followers}</p>
+                    <p><strong>Following:</strong> ${details.following}</p>
+                    <p><strong>Posts:</strong> ${details.posts}</p>
+                    
+                    ${details.isBusinessAccount ? 
+                        `<p><strong>Account Type:</strong> <span class="status-badge status-business">Business Account</span></p>` :
+                        `<p><strong>Account Type:</strong> <span class="status-badge status-personal">Personal Account</span></p>`
+                    }
+                    
+                    ${details.businessCategory ? `<p><strong>Business Category:</strong> ${details.businessCategory}</p>` : ''}
+                    ${details.companyName ? `<p><strong>Company Name:</strong> ${details.companyName}</p>` : ''}
+                </div>
+                
+                <div class="mt-20">
+                    <a href="https://instagram.com/${username}" target="_blank" class="btn btn-primary">
+                        <i class="fab fa-instagram"></i> Visit Instagram Profile
+                    </a>
+                </div>
+            `;
+        }
+
+        // Handle export results
+        function handleExportResults() {
+            if (currentAccounts.length === 0) {
+                alert('No data to export');
+                return;
+            }
+            
+            const csvData = generateCSV();
+            downloadCSV(csvData, 'instagram-business-accounts-demo.csv');
+        }
+
+        // Generate CSV data
+        function generateCSV() {
+            const headers = ['Username', 'Company Name', 'Description', 'Discovered At', 'Instagram URL'];
+            
+            const rows = currentAccounts.map(account => {
+                const companyName = account.companyName || 'Unknown';
+                
+                return [
+                    account.username || '',
+                    companyName,
+                    (account.description || '').replace(/"/g, '""'),
+                    account.discoveredAt || '',
+                    `https://instagram.com/${account.username}`
+                ];
+            });
+            
+            const csvContent = [headers, ...rows]
+                .map(row => row.map(field => `"${field}"`).join(','))
+                .join('\n');
+            
+            return csvContent;
+        }
+
+        // Download CSV file
+        function downloadCSV(csvContent, filename) {
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            
+            if (link.download !== undefined) {
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', filename);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+
+        // Utility functions
+        function showLoading(show) {
+            loadingIndicator.style.display = show ? 'block' : 'none';
+        }
+
+        function showResults() {
+            resultsSection.style.display = 'block';
+        }
+
+        function hideResults() {
+            resultsSection.style.display = 'none';
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return 'Unknown';
+            return new Date(dateString).toLocaleDateString();
+        }
+
+        // Make functions globally available
+        window.viewAccountDetails = viewAccountDetails;
+    </script>
+</body>
+</html>

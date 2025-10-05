@@ -1,0 +1,2 @@
+# This file ensures the uploads directory is tracked by git
+# Uploaded CSV files will be temporarily stored here and automatically deleted after processing
