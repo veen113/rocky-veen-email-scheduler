@@ -1,5 +1,6 @@
 const express = require('express');
 const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 const multer = require('multer');
 const csv = require('csv-parser');
 const fs = require('fs');
@@ -22,14 +23,39 @@ const upload = multer({
 // Initialize Resend client
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// Email provider configuration
+const getEmailProvider = () => {
+    return process.env.EMAIL_PROVIDER || 'resend'; // 'resend' or 'smtp'
+};
+
+// Create SMTP transporter
+const createSMTPTransporter = () => {
+    const port = parseInt(process.env.SMTP_PORT) || 465;
+    
+    return nodemailer.createTransport({
+        host: process.env.SMTP_HOST || 'mail.privateemail.com',
+        port: port,
+        secure: port === 465, // SSL/TLS for port 465
+        auth: {
+            user: process.env.EMAIL_USER || 'collab@rockyveen.com',
+            pass: process.env.EMAIL_PASSWORD
+        },
+        connectionTimeout: 60000,
+        greetingTimeout: 30000,
+        socketTimeout: 60000,
+    });
+};
+
 // Store scheduled emails (in production, use a database)
 const scheduledEmails = new Map();
 
-// Email template for Resend
+// Email template (works for both Resend and SMTP)
 const createEmailTemplate = (companyName, recipientEmail) => {
+    const provider = getEmailProvider();
+    
     return {
         from: 'Rocky Veen <collab@rockyveen.com>',
-        to: [recipientEmail],
+        to: provider === 'resend' ? [recipientEmail] : recipientEmail, // Resend needs array, SMTP needs string
         subject: `Partnership Opportunity with @rockyveen – Proven Results Across Leading Brands & Categories`,
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; line-height: 1.6; color: #333;">
@@ -86,6 +112,35 @@ const createEmailTemplate = (companyName, recipientEmail) => {
     };
 };
 
+// Universal email sending function
+const sendEmail = async (emailOptions) => {
+    const provider = getEmailProvider();
+    
+    if (provider === 'smtp') {
+        // Use SMTP/Nodemailer
+        const transporter = createSMTPTransporter();
+        const result = await transporter.sendMail(emailOptions);
+        return {
+            success: true,
+            provider: 'SMTP',
+            messageId: result.messageId,
+            response: result.response
+        };
+    } else {
+        // Use Resend API (default)
+        const result = await resend.emails.send(emailOptions);
+        if (result.error) {
+            throw new Error(result.error.message);
+        }
+        return {
+            success: true,
+            provider: 'Resend',
+            emailId: result.data?.id,
+            data: result.data
+        };
+    }
+};
+
 // Send single email
 router.post('/send-single', async (req, res) => {
     try {
@@ -119,8 +174,8 @@ router.post('/send-single', async (req, res) => {
             
             const task = cron.schedule(cronExpression, async () => {
                 try {
-                    const result = await resend.emails.send(emailOptions);
-                    console.log(`Scheduled email sent to ${email} for ${companyName}`, result);
+                    const result = await sendEmail(emailOptions);
+                    console.log(`Scheduled email sent to ${email} for ${companyName} via ${result.provider}`, result);
                     scheduledEmails.delete(scheduleId);
                     task.destroy();
                 } catch (error) {
@@ -144,15 +199,16 @@ router.post('/send-single', async (req, res) => {
                 scheduleId
             });
         } else {
-            // Send immediately using Resend
+            // Send immediately using selected provider
             const emailOptions = createEmailTemplate(companyName, email);
-            const result = await resend.emails.send(emailOptions);
+            const result = await sendEmail(emailOptions);
             
-            console.log('✅ Email sent via Resend:', result);
+            console.log(`✅ Email sent via ${result.provider}:`, result);
             res.json({
                 success: true,
-                message: `Email sent successfully to ${email}`,
-                emailId: result.data?.id
+                message: `Email sent successfully to ${email} via ${result.provider}`,
+                provider: result.provider,
+                emailId: result.emailId || result.messageId
             });
         }
     } catch (error) {
@@ -236,7 +292,7 @@ router.post('/send-bulk', upload.single('csvFile'), async (req, res) => {
                                 try {
                                     console.log(`Sending scheduled email ${emailNumber}/${emails.length} to ${email}`);
                                     const emailOptions = createEmailTemplate(companyName, email);
-                                    const result = await resend.emails.send(emailOptions);
+                                    const result = await sendEmail(emailOptions);
                                     results.push({ 
                                         email, 
                                         companyName, 
@@ -311,7 +367,7 @@ router.post('/send-bulk', upload.single('csvFile'), async (req, res) => {
                             try {
                                 console.log(`Sending email ${emailNumber}/${emails.length} to ${email}`);
                                 const emailOptions = createEmailTemplate(companyName, email);
-                                const result = await resend.emails.send(emailOptions);
+                                const result = await sendEmail(emailOptions);
                                 results.push({ 
                                     email, 
                                     companyName, 
@@ -421,60 +477,103 @@ router.delete('/scheduled/:id', (req, res) => {
     }
 });
 
-// Test email configuration using Resend API
+// Test email configuration for both providers
 router.post('/test', async (req, res) => {
     try {
-        if (!process.env.RESEND_API_KEY) {
-            return res.status(500).json({
-                success: false,
-                message: 'RESEND_API_KEY environment variable is not set'
+        const provider = getEmailProvider();
+        console.log(`Testing ${provider.toUpperCase()} email configuration...`);
+        
+        if (provider === 'smtp') {
+            // Test SMTP configuration
+            if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'SMTP credentials not configured. Please set EMAIL_USER and EMAIL_PASSWORD environment variables.'
+                });
+            }
+            
+            const transporter = createSMTPTransporter();
+            await transporter.verify();
+            
+            console.log('✅ SMTP connection successful');
+            res.json({
+                success: true,
+                message: `Email configuration is valid (using SMTP: ${process.env.SMTP_HOST}:${process.env.SMTP_PORT})`,
+                provider: 'SMTP',
+                host: process.env.SMTP_HOST,
+                port: process.env.SMTP_PORT
             });
-        }
-
-        console.log('Testing Resend API connection...');
-        
-        // Test with a simple API call to verify the key works
-        const testResult = await resend.emails.send({
-            from: 'Rocky Veen <collab@rockyveen.com>',
-            to: ['test@example.com'], // This won't actually send due to invalid recipient
-            subject: 'Test Email Configuration',
-            html: '<p>This is a test email to verify Resend configuration.</p>'
-        });
-
-        // If we get here without error, the API key is valid
-        console.log('✅ Resend API connection successful');
-        res.json({
-            success: true,
-            message: 'Email configuration is valid (using Resend API)',
-            provider: 'Resend'
-        });
-        
-    } catch (error) {
-        console.error('❌ Resend API test failed:', error);
-        
-        // Check if it's an API key issue
-        if (error.message?.includes('API key') || error.message?.includes('unauthorized')) {
-            return res.status(500).json({
-                success: false,
-                message: 'Invalid Resend API key',
-                error: 'Please check your RESEND_API_KEY environment variable'
+            
+        } else {
+            // Test Resend API (default)
+            if (!process.env.RESEND_API_KEY) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'RESEND_API_KEY environment variable is not set'
+                });
+            }
+            
+            // Test with a simple API call to verify the key works
+            const testResult = await resend.emails.send({
+                from: 'Rocky Veen <collab@rockyveen.com>',
+                to: ['test@example.com'], // This won't actually send due to invalid recipient
+                subject: 'Test Email Configuration',
+                html: '<p>This is a test email to verify Resend configuration.</p>'
             });
-        }
-        
-        // For other errors (like invalid recipient), consider it a successful test
-        // since it means the API key works
-        if (error.message?.includes('Invalid recipient') || error.name === 'validation_error') {
-            return res.json({
+
+            // If we get here without error, the API key is valid
+            console.log('✅ Resend API connection successful');
+            res.json({
                 success: true,
                 message: 'Email configuration is valid (using Resend API)',
-                provider: 'Resend',
-                note: 'API key verified successfully'
+                provider: 'Resend'
             });
+        }
+        
+    } catch (error) {
+        console.error(`❌ ${getEmailProvider().toUpperCase()} test failed:`, error);
+        
+        const provider = getEmailProvider();
+        
+        if (provider === 'smtp') {
+            // SMTP-specific error handling
+            if (error.code === 'EAUTH') {
+                return res.status(500).json({
+                    success: false,
+                    message: 'SMTP authentication failed',
+                    error: 'Please check your EMAIL_USER and EMAIL_PASSWORD'
+                });
+            } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNECTION') {
+                return res.status(500).json({
+                    success: false,
+                    message: 'SMTP connection failed',
+                    error: 'Please check your SMTP_HOST and SMTP_PORT settings'
+                });
+            }
+        } else {
+            // Resend-specific error handling
+            if (error.message?.includes('API key') || error.message?.includes('unauthorized')) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Invalid Resend API key',
+                    error: 'Please check your RESEND_API_KEY environment variable'
+                });
+            }
+            
+            // For other errors (like invalid recipient), consider it a successful test
+            if (error.message?.includes('Invalid recipient') || error.name === 'validation_error') {
+                return res.json({
+                    success: true,
+                    message: 'Email configuration is valid (using Resend API)',
+                    provider: 'Resend',
+                    note: 'API key verified successfully'
+                });
+            }
         }
         
         res.status(500).json({
             success: false,
-            message: 'Email configuration test failed',
+            message: `${provider.toUpperCase()} configuration test failed`,
             error: error.message
         });
     }
