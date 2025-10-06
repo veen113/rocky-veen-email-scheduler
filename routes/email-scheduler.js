@@ -21,14 +21,21 @@ const upload = multer({
 
 // Email transporter configuration
 const createTransporter = () => {
+    const port = parseInt(process.env.SMTP_PORT) || 587;
+    const isSecure = port === 465;
+    
     return nodemailer.createTransport({
         host: process.env.SMTP_HOST || 'mail.privateemail.com',
-        port: process.env.SMTP_PORT || 465,
-        secure: true, // true for 465, false for other ports
+        port: port,
+        secure: isSecure, // true for 465, false for other ports
+        requireTLS: !isSecure, // Use STARTTLS for non-465 ports
         auth: {
             user: process.env.EMAIL_USER || 'collab@rockyveen.com',
             pass: process.env.EMAIL_PASSWORD
-        }
+        },
+        connectionTimeout: 60000, // 60 seconds
+        greetingTimeout: 30000, // 30 seconds
+        socketTimeout: 60000, // 60 seconds
     });
 };
 
