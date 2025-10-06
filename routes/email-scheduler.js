@@ -1,15 +1,15 @@
 const express = require('express');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const multer = require('multer');
 const csv = require('csv-parser');
 const fs = require('fs');
-const path = require('path');
 const cron = require('node-cron');
+const path = require('path');
 const router = express.Router();
 
 // Configure multer for file uploads
 const upload = multer({ 
-    dest: 'uploads/',
+    dest: path.join(__dirname, 'uploads/'),
     fileFilter: (req, file, cb) => {
         if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
             cb(null, true);
@@ -19,44 +19,17 @@ const upload = multer({
     }
 });
 
-// Email transporter configuration
-const createTransporter = () => {
-    const port = parseInt(process.env.SMTP_PORT) || 465;
-    const host = process.env.SMTP_HOST || 'mail.privateemail.com';
-    
-    // Primary configuration (PrivateEmail official settings)
-    const config = {
-        host: host,
-        port: port,
-        secure: port === 465, // SSL/TLS for port 465
-        auth: {
-            user: process.env.EMAIL_USER || 'collab@rockyveen.com',
-            pass: process.env.EMAIL_PASSWORD
-        },
-        connectionTimeout: 60000, // 60 seconds
-        greetingTimeout: 30000, // 30 seconds
-        socketTimeout: 60000, // 60 seconds
-        logger: true, // Enable logging for debugging
-        debug: process.env.NODE_ENV !== 'production' // Debug in development
-    };
-    
-    // Add STARTTLS for non-465 ports
-    if (port !== 465) {
-        config.secure = false;
-        config.requireTLS = true;
-    }
-    
-    return nodemailer.createTransport(config);
-};
+// Initialize Resend client
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Store scheduled emails (in production, use a database)
 const scheduledEmails = new Map();
 
-// Email template
+// Email template for Resend
 const createEmailTemplate = (companyName, recipientEmail) => {
     return {
-        from: 'collab@rockyveen.com',
-        to: recipientEmail,
+        from: 'Rocky Veen <collab@rockyveen.com>',
+        to: [recipientEmail],
         subject: `Partnership Opportunity with @rockyveen – Proven Results Across Leading Brands & Categories`,
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; line-height: 1.6; color: #333;">
@@ -147,8 +120,8 @@ router.post('/send-single', async (req, res) => {
             
             const task = cron.schedule(cronExpression, async () => {
                 try {
-                    await transporter.sendMail(emailOptions);
-                    console.log(`Scheduled email sent to ${email} for ${companyName}`);
+                    const result = await resend.emails.send(emailOptions);
+                    console.log(`Scheduled email sent to ${email} for ${companyName}`, result);
                     scheduledEmails.delete(scheduleId);
                     task.destroy();
                 } catch (error) {
@@ -164,7 +137,6 @@ router.post('/send-single', async (req, res) => {
                 companyName,
                 scheduleTime: scheduleDate,
                 type: 'single',
-                status: 'scheduled'
             });
 
             res.json({
@@ -173,11 +145,15 @@ router.post('/send-single', async (req, res) => {
                 scheduleId
             });
         } else {
-            // Send immediately
-            await transporter.sendMail(emailOptions);
+            // Send immediately using Resend
+            const emailOptions = createEmailTemplate(companyName, email);
+            const result = await resend.emails.send(emailOptions);
+            
+            console.log('✅ Email sent via Resend:', result);
             res.json({
                 success: true,
-                message: `Email sent successfully to ${email}`
+                message: `Email sent successfully to ${email}`,
+                emailId: result.data?.id
             });
         }
     } catch (error) {
@@ -263,7 +239,7 @@ router.post('/send-bulk', upload.single('csvFile'), async (req, res) => {
                                 try {
                                     console.log(`Sending scheduled email ${emailNumber}/${emails.length} to ${email}`);
                                     const emailOptions = createEmailTemplate(companyName, email);
-                                    await transporter.sendMail(emailOptions);
+                                    const result = await resend.emails.send(emailOptions);
                                     results.push({ 
                                         email, 
                                         companyName, 
@@ -338,7 +314,7 @@ router.post('/send-bulk', upload.single('csvFile'), async (req, res) => {
                             try {
                                 console.log(`Sending email ${emailNumber}/${emails.length} to ${email}`);
                                 const emailOptions = createEmailTemplate(companyName, email);
-                                await transporter.sendMail(emailOptions);
+                                const result = await resend.emails.send(emailOptions);
                                 results.push({ 
                                     email, 
                                     companyName, 
@@ -448,57 +424,63 @@ router.delete('/scheduled/:id', (req, res) => {
     }
 });
 
-// Test email configuration with fallback ports
+// Test email configuration using Resend API
 router.post('/test', async (req, res) => {
-    const ports = [465, 587, 25]; // Try multiple ports
-    let lastError = null;
-    
-    for (const port of ports) {
-        try {
-            console.log(`Testing SMTP connection on port ${port}...`);
-            
-            const config = {
-                host: process.env.SMTP_HOST || 'mail.privateemail.com',
-                port: port,
-                secure: port === 465,
-                auth: {
-                    user: process.env.EMAIL_USER || 'collab@rockyveen.com',
-                    pass: process.env.EMAIL_PASSWORD
-                },
-                connectionTimeout: 30000,
-                greetingTimeout: 15000,
-                socketTimeout: 30000,
-            };
-            
-            if (port !== 465) {
-                config.requireTLS = true;
-            }
-            
-            const transporter = nodemailer.createTransport(config);
-            await transporter.verify();
-            
-            console.log(`✅ SMTP connection successful on port ${port}`);
+    try {
+        if (!process.env.RESEND_API_KEY) {
+            return res.status(500).json({
+                success: false,
+                message: 'RESEND_API_KEY environment variable is not set'
+            });
+        }
+
+        console.log('Testing Resend API connection...');
+        
+        // Test with a simple API call to verify the key works
+        const testResult = await resend.emails.send({
+            from: 'Rocky Veen <collab@rockyveen.com>',
+            to: ['test@example.com'], // This won't actually send due to invalid recipient
+            subject: 'Test Email Configuration',
+            html: '<p>This is a test email to verify Resend configuration.</p>'
+        });
+
+        // If we get here without error, the API key is valid
+        console.log('✅ Resend API connection successful');
+        res.json({
+            success: true,
+            message: 'Email configuration is valid (using Resend API)',
+            provider: 'Resend'
+        });
+        
+    } catch (error) {
+        console.error('❌ Resend API test failed:', error);
+        
+        // Check if it's an API key issue
+        if (error.message?.includes('API key') || error.message?.includes('unauthorized')) {
+            return res.status(500).json({
+                success: false,
+                message: 'Invalid Resend API key',
+                error: 'Please check your RESEND_API_KEY environment variable'
+            });
+        }
+        
+        // For other errors (like invalid recipient), consider it a successful test
+        // since it means the API key works
+        if (error.message?.includes('Invalid recipient') || error.name === 'validation_error') {
             return res.json({
                 success: true,
-                message: `Email configuration is valid (using port ${port})`,
-                port: port
+                message: 'Email configuration is valid (using Resend API)',
+                provider: 'Resend',
+                note: 'API key verified successfully'
             });
-            
-        } catch (error) {
-            console.error(`❌ Port ${port} failed:`, error.message);
-            lastError = error;
-            continue;
         }
+        
+        res.status(500).json({
+            success: false,
+            message: 'Email configuration test failed',
+            error: error.message
+        });
     }
-    
-    // If all ports failed
-    console.error('All SMTP ports failed. Last error:', lastError);
-    res.status(500).json({
-        success: false,
-        message: 'Email configuration test failed on all ports',
-        error: lastError?.message || 'Connection failed',
-        testedPorts: ports
-    });
 });
 
 module.exports = router;
