@@ -21,14 +21,14 @@ const upload = multer({
 
 // Email transporter configuration
 const createTransporter = () => {
-    const port = parseInt(process.env.SMTP_PORT) || 587;
-    const isSecure = port === 465;
+    const port = parseInt(process.env.SMTP_PORT) || 465;
+    const host = process.env.SMTP_HOST || 'mail.privateemail.com';
     
-    return nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'mail.privateemail.com',
+    // Primary configuration (PrivateEmail official settings)
+    const config = {
+        host: host,
         port: port,
-        secure: isSecure, // true for 465, false for other ports
-        requireTLS: !isSecure, // Use STARTTLS for non-465 ports
+        secure: port === 465, // SSL/TLS for port 465
         auth: {
             user: process.env.EMAIL_USER || 'collab@rockyveen.com',
             pass: process.env.EMAIL_PASSWORD
@@ -36,7 +36,17 @@ const createTransporter = () => {
         connectionTimeout: 60000, // 60 seconds
         greetingTimeout: 30000, // 30 seconds
         socketTimeout: 60000, // 60 seconds
-    });
+        logger: true, // Enable logging for debugging
+        debug: process.env.NODE_ENV !== 'production' // Debug in development
+    };
+    
+    // Add STARTTLS for non-465 ports
+    if (port !== 465) {
+        config.secure = false;
+        config.requireTLS = true;
+    }
+    
+    return nodemailer.createTransport(config);
 };
 
 // Store scheduled emails (in production, use a database)
@@ -438,26 +448,57 @@ router.delete('/scheduled/:id', (req, res) => {
     }
 });
 
-// Test email configuration
+// Test email configuration with fallback ports
 router.post('/test', async (req, res) => {
-    try {
-        const transporter = createTransporter();
-        
-        // Verify transporter configuration
-        await transporter.verify();
-        
-        res.json({
-            success: true,
-            message: 'Email configuration is valid'
-        });
-    } catch (error) {
-        console.error('Email configuration test failed:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Email configuration test failed',
-            error: error.message
-        });
+    const ports = [465, 587, 25]; // Try multiple ports
+    let lastError = null;
+    
+    for (const port of ports) {
+        try {
+            console.log(`Testing SMTP connection on port ${port}...`);
+            
+            const config = {
+                host: process.env.SMTP_HOST || 'mail.privateemail.com',
+                port: port,
+                secure: port === 465,
+                auth: {
+                    user: process.env.EMAIL_USER || 'collab@rockyveen.com',
+                    pass: process.env.EMAIL_PASSWORD
+                },
+                connectionTimeout: 30000,
+                greetingTimeout: 15000,
+                socketTimeout: 30000,
+            };
+            
+            if (port !== 465) {
+                config.requireTLS = true;
+            }
+            
+            const transporter = nodemailer.createTransport(config);
+            await transporter.verify();
+            
+            console.log(`✅ SMTP connection successful on port ${port}`);
+            return res.json({
+                success: true,
+                message: `Email configuration is valid (using port ${port})`,
+                port: port
+            });
+            
+        } catch (error) {
+            console.error(`❌ Port ${port} failed:`, error.message);
+            lastError = error;
+            continue;
+        }
     }
+    
+    // If all ports failed
+    console.error('All SMTP ports failed. Last error:', lastError);
+    res.status(500).json({
+        success: false,
+        message: 'Email configuration test failed on all ports',
+        error: lastError?.message || 'Connection failed',
+        testedPorts: ports
+    });
 });
 
 module.exports = router;
