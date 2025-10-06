@@ -3,8 +3,6 @@ const cors = require('cors');
 const path = require('path');
 require('dotenv').config();
 
-const instagramRoutes = require('./routes/instagram');
-const instagramMockRoutes = require('./routes/instagram-mock');
 const emailSchedulerRoutes = require('./routes/email-scheduler');
 
 const app = express();
@@ -16,8 +14,6 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // Routes
-app.use('/api/instagram', instagramRoutes);
-app.use('/api/instagram', instagramMockRoutes);
 app.use('/api/email', emailSchedulerRoutes);
 
 // Serve the main page
@@ -37,7 +33,7 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log('Instagram Business Account Finder is ready!');
-    console.log(`Email Scheduler available at: http://localhost:${PORT}/email-scheduler`);
+    console.log(`🚀 Rocky Veen Email Scheduler running on port ${PORT}`);
+    console.log(`📧 Email Scheduler available at: http://localhost:${PORT}/email-scheduler`);
+    console.log(`✨ Ready to send collaboration emails!`);
 });
