@@ -98,7 +98,6 @@ router.post('/send-single', async (req, res) => {
             });
         }
 
-        const transporter = createTransporter();
         const emailOptions = createEmailTemplate(companyName, email);
 
         if (scheduleTime) {
@@ -204,8 +203,6 @@ router.post('/send-bulk', upload.single('csvFile'), async (req, res) => {
                             message: 'No valid email entries found in CSV. Please ensure your CSV has "email" and "companyName" columns.'
                         });
                     }
-
-                    const transporter = createTransporter();
 
                     if (scheduleTime) {
                         // Schedule bulk emails
